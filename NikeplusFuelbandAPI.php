@@ -15,19 +15,25 @@ class NikeplusFuelbandAPI {
    * @var string
    * The email of the main account.
    */
-  private  $email = '';
+  private $email = '';
 
   /**
    * @var string
    * The password of the main account.
    */
-  private  $password = '';
+  private $password = '';
+
+  /**
+   * @var string
+   * The username of the main account
+   */
+  private $username = '';
 
   /**
    * @var bool
    * Flag that indicates if the current object is authenticated or not.
    */
-  private  $authenticated = FALSE;
+  private $authenticated = FALSE;
 
   /**
    * @const
@@ -40,7 +46,7 @@ class NikeplusFuelbandAPI {
    * @const
    * The base url path of the profiles.
    */
-  const base_profile_url = 'http://nikeplus.nike.com/plus/profile/';
+  const base_profile_url = 'http://nikeplus.nike.com/plus/';
 
   public function __construct($email, $password) {
     $this->email = $email;
@@ -73,7 +79,9 @@ class NikeplusFuelbandAPI {
     $curl_error = curl_error($curl);
     curl_close($curl);
     if ($curl_errno == 0) {
+      $result = json_decode($result);
       $this->authenticated = TRUE;
+      $this->username = $result->serviceResponse->body->User->screenName;
     }
     else {
      // @todo: handle errors here?
@@ -87,8 +95,8 @@ class NikeplusFuelbandAPI {
    *
    * @param string $friend_name
    *   The nikeplus profile name.
-   * @return bool|mixed
-   *   If the activity was found, it will return a json object containing the
+   * @return bool|object
+   *   If the activity was found, it will return an object containing the
    *   information about that activity. Otherwise, returns FALSE.
    */
   public function getFriendLastFullActivity($friend_name) {
@@ -102,10 +110,10 @@ class NikeplusFuelbandAPI {
         return FALSE;
       }
     }
-    $url = NikeplusFuelbandAPI::base_profile_url . $friend_name;
+    $url = NikeplusFuelbandAPI::base_profile_url . 'profile/' . $friend_name;
     $html = $this->request($url);
 
-    $activity = $this->searchActivity($html);
+    $activity = $this->searchActivity($html, 'secondMostRecentActivity');
     if ($activity->activity->activityType != "ALL_DAY") {
       $activity = $this->searchActivity($html, 'thirdMostRecentActivity');
       if ($activity->activity->activityType != "ALL_DAY") {
@@ -116,17 +124,90 @@ class NikeplusFuelbandAPI {
   }
 
   /**
+   * Returns the last full activity for own useraccount.
+   *
+   * @param int $week_offset
+   *   The offset of the current week to search in. Used for recursion.
+   *
+   * @param bool $monday_had_fuelpoints
+   *   Boolean if monday of next week of requested week had fuelpoints.
+   *   Used for recursion. Default to FALSE.
+   *
+   * @return bool|object
+   *   If the activity was found, it will return an object containing the
+   *   information about that activity. Otherwise, returns FALSE.
+   */
+  public function getMyLastFullActivity($week_offset = 0, $monday_had_fuelpoints = FALSE) {
+    // If not yet logged in, do it now.
+    if (!$this->authenticated) {
+      $this->login();
+      // If not yet authenticated, something is wrong, so just return FALSE.
+      // The reason why the user is not authenticated should be handled by the
+      // login method.
+      if (!$this->authenticated) {
+        return FALSE;
+      }
+    }
+
+    // Load the timestamp from monday from requested.
+    if ($week_offset == 0) {
+      $monday_of_week_timestamp = strtotime('monday this week');
+    }
+    else {
+      $monday_of_week_timestamp = strtotime('- ' . $week_offset . 'week', strtotime('monday this week'));
+    }
+
+    // Build the Year, Month and Monday strings for GMT for requested week.
+    $year = gmdate("Y", $monday_of_week_timestamp);
+    $month = gmdate("n", $monday_of_week_timestamp);
+    $monday = gmdate("j", $monday_of_week_timestamp);
+
+    // Build URL for request
+    $url = NikeplusFuelbandAPI::base_profile_url . 'activity/fuelband/' . $this->username . '/week/' . $year . '/' . $month . '/' . $monday;
+
+    $html = $this->request($url);
+
+    $activities = $this->searchActivity($html, 'baked_data');
+
+    // If $monday_had_fuelpoints == TRUE we where called recursively and the next day
+    // (monday next week) has fuelpoint, so we can directly return the last day of
+    // this week (sunday).
+    if ($monday_had_fuelpoints) {
+      return $activities->items[6];
+    }
+
+    // $activities always contains a full week. We go backwards through it and search
+    // for an activity with fuelpoints.
+    for ($i=6; $i >= 0; $i--) {
+      if ($activities->items[$i]->value != 0 && $i == 0) {
+        // Found activity with fuelpoints but we are already on the monday of week.
+        // So we cannot return one activity earlier we load one week earlier.
+        // And tell the function that monday has fuelpoints.
+        return $this->getMyLastFullActivity(1, TRUE);
+
+      }
+      elseif ($activities->items[$i]->value != 0 && $i != 0) {
+        // Found activity with fuelpoints and we are not on monday of week.
+        // Return one activity older then the found one.
+        return $activities->items[$i-1];
+      }
+    }
+    // No activity with fuelpoints this week, we load one week earlier
+    return $this->getMyLastFullActivity(1, FALSE);
+  }
+
+  /**
    * Parses an html string to return the details of a specific activity.
    *
    * @param string $html
    *   The html to search in.
    * @param string $activity
-   *   What activity to search. Valid values are: "secondMostRecentActivity" and
-   *   "thirdMostRecentActivity".
-   * @return mixed
-   *   A json object with the details of the activity.
+   *   What activity (javascript object name) to search for,
+   *   'window.np.' will be prefixed.
+   * @return object
+   *   A object with the details of the activity.
    */
-  private function searchActivity($html, $activity = 'secondMostRecentActivity') {
+  private function searchActivity($html, $activity) {
     // @todo: refactor this code.
     $words = explode('window.np.' . $activity . ' = ', $html);
     $words = explode('</script>', $words[1]);
@@ -151,6 +232,7 @@ class NikeplusFuelbandAPI {
     }
     $curl = curl_init();
     curl_setopt($curl, CURLOPT_RETURNTRANSFER, TRUE);
+    curl_setopt($curl, CURLOPT_FOLLOWLOCATION, TRUE);
     curl_setopt($curl, CURLOPT_URL, $url);
     curl_setopt($curl, CURLOPT_COOKIEJAR, NikeplusFuelbandAPI::cookie_file);
     curl_setopt($curl, CURLOPT_COOKIEFILE, NikeplusFuelbandAPI::cookie_file);
