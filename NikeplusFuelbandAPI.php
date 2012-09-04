@@ -65,6 +65,10 @@ class NikeplusFuelbandAPI {
    * Logs in the user.
    */
   public function login() {
+    // If already authenticated, skip it.
+    if ($this->isAuthenticated()) {
+      return;
+    }
     $curl = curl_init();
     curl_setopt($curl, CURLOPT_RETURNTRANSFER, TRUE);
     curl_setopt($curl, CURLOPT_URL, 'https://secure-nikeplus.nike.com/nsl/services/user/login?app=b31990e7-8583-4251-808f-9dc67b40f5d2&format=json&contentType=plaintext');
@@ -100,15 +104,13 @@ class NikeplusFuelbandAPI {
    *   information about that activity. Otherwise, returns FALSE.
    */
   public function getFriendLastFullActivity($friend_name) {
-    // If not yet logged in, do it now.
-    if (!$this->authenticated) {
-      $this->login();
-      // If not yet authenticated, something is wrong, so just return FALSE.
-      // The reason why the user is not authenticated should be handled by the
-      // login method.
-      if (!$this->authenticated) {
-        return FALSE;
-      }
+    // Make sure we are logged in.
+    $this->login();
+    // If not yet authenticated, something is wrong, so just return FALSE.
+    // The reason why the user is not authenticated should be handled by the
+    // login method.
+    if (!$this->isAuthenticated()) {
+      return FALSE;
     }
     $url = NikeplusFuelbandAPI::base_profile_url . 'profile/' . $friend_name;
     $html = $this->request($url);
@@ -124,37 +126,35 @@ class NikeplusFuelbandAPI {
   }
 
   /**
-   * Returns the last full activity for own useraccount.
+   * Returns the last full activity for own user account.
    *
    * @param int $week_offset
    *   The offset of the current week to search in. Used for recursion.
    *
    * @param bool $monday_had_fuelpoints
-   *   Boolean if monday of next week of requested week had fuelpoints.
-   *   Used for recursion. Default to FALSE.
+   *   If monday of next week of requested week had fuelpoints.
+   *   Used for recursion. Defaults to FALSE.
    *
    * @return bool|object
    *   If the activity was found, it will return an object containing the
    *   information about that activity. Otherwise, returns FALSE.
    */
   public function getMyLastFullActivity($week_offset = 0, $monday_had_fuelpoints = FALSE) {
-    // If not yet logged in, do it now.
-    if (!$this->authenticated) {
-      $this->login();
-      // If not yet authenticated, something is wrong, so just return FALSE.
-      // The reason why the user is not authenticated should be handled by the
-      // login method.
-      if (!$this->authenticated) {
-        return FALSE;
-      }
+   // Make sure we are logged in.
+    $this->login();
+    // If not yet authenticated, something is wrong, so just return FALSE.
+    // The reason why the user is not authenticated should be handled by the
+    // login method.
+    if (!$this->isAuthenticated()) {
+      return FALSE;
     }
 
-    // Load the timestamp from monday from requested.
+    // Load the timestamp from monday of the requested week.
     if ($week_offset == 0) {
       $monday_of_week_timestamp = strtotime('monday this week');
     }
     else {
-      $monday_of_week_timestamp = strtotime('- ' . $week_offset . 'week', strtotime('monday this week'));
+      $monday_of_week_timestamp = strtotime('- ' . $week_offset . ' week', strtotime('monday this week'));
     }
 
     // Build the Year, Month and Monday strings for GMT for requested week.
@@ -169,9 +169,9 @@ class NikeplusFuelbandAPI {
 
     $activities = $this->searchActivity($html, 'baked_data');
 
-    // If $monday_had_fuelpoints == TRUE we where called recursively and the next day
-    // (monday next week) has fuelpoint, so we can directly return the last day of
-    // this week (sunday).
+    // If $monday_had_fuelpoints == TRUE we were called recursively and the next day
+    // (Monday next week) has fuelpoints, so we can directly return the last day of
+    // this week (Sunday).
     if ($monday_had_fuelpoints) {
       return $activities->items[6];
     }
@@ -180,20 +180,20 @@ class NikeplusFuelbandAPI {
     // for an activity with fuelpoints.
     for ($i=6; $i >= 0; $i--) {
       if ($activities->items[$i]->value != 0 && $i == 0) {
-        // Found activity with fuelpoints but we are already on the monday of week.
-        // So we cannot return one activity earlier we load one week earlier.
-        // And tell the function that monday has fuelpoints.
-        return $this->getMyLastFullActivity(1, TRUE);
+        // Found activity with fuelpoints but we are already on the Monday of the week.
+        // But because we cannot return one activity earlier, we load one week
+        // earlier and tell the function that Monday has fuelpoints.
+        return $this->getMyLastFullActivity($week_offset + 1, TRUE);
 
       }
       elseif ($activities->items[$i]->value != 0 && $i != 0) {
-        // Found activity with fuelpoints and we are not on monday of week.
-        // Return one activity older then the found one.
+        // Found activity with fuelpoints and we are not on Monday.
+        // Return one activity older than the found one.
         return $activities->items[$i-1];
       }
     }
-    // No activity with fuelpoints this week, we load one week earlier
-    return $this->getMyLastFullActivity(1, FALSE);
+    // No activity with fuelpoints this week, we load one week earlier.
+    return $this->getMyLastFullActivity($week_offset + 1, FALSE);
   }
 
   /**
