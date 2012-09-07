@@ -71,6 +71,7 @@ class NikeplusFuelbandAPI {
     }
     $curl = curl_init();
     curl_setopt($curl, CURLOPT_RETURNTRANSFER, TRUE);
+    curl_setopt($curl, CURLOPT_USERAGENT, "Mozilla/4.0 (compatible; MSIE 5.01; Windows NT 5.0)");
     curl_setopt($curl, CURLOPT_URL, 'https://secure-nikeplus.nike.com/nsl/services/user/login?app=b31990e7-8583-4251-808f-9dc67b40f5d2&format=json&contentType=plaintext');
     curl_setopt($curl, CURLOPT_POST, 1);
     curl_setopt($curl, CURLOPT_POSTFIELDS, 'email=' . $this->email . '&password=' . $this->password);
@@ -233,6 +234,7 @@ class NikeplusFuelbandAPI {
     $curl = curl_init();
     curl_setopt($curl, CURLOPT_RETURNTRANSFER, TRUE);
     curl_setopt($curl, CURLOPT_FOLLOWLOCATION, TRUE);
+    curl_setopt($curl, CURLOPT_USERAGENT, "Mozilla/4.0 (compatible; MSIE 5.01; Windows NT 5.0)");
     curl_setopt($curl, CURLOPT_URL, $url);
     curl_setopt($curl, CURLOPT_COOKIEJAR, NikeplusFuelbandAPI::cookie_file);
     curl_setopt($curl, CURLOPT_COOKIEFILE, NikeplusFuelbandAPI::cookie_file);
